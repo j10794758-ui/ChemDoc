@@ -48,7 +48,7 @@ python -m chemdoc_miner stats
 python -m chemdoc_miner export-app-html
 ```
 
-生成 `data/derived/ChemDoc.html`。AirDrop / 微信传文件到 iPhone，用 **Safari** 打开，可「添加到主屏幕」。
+生成 `data/derived/ChemDoc.html`，并同步写入仓库根目录 `index.html`（供 GitHub Pages）。AirDrop / 微信传文件到 iPhone，用 **Safari** 打开，可「添加到主屏幕」。
 
 旧命令 `export-xref-html` / `export-products-html` / `export-finder-html` 也会生成同一文件。
 

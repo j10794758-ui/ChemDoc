@@ -33,6 +33,17 @@ def test_export_app_html(tmp_path):
     assert "data:image/svg+xml;base64," in text
 
 
+def test_export_app_html_writes_index_at_repo_root():
+    from chemdoc_miner.paths import ROOT
+
+    export_app_html()
+    index = ROOT / "index.html"
+    derived = ROOT / "data" / "derived" / "ChemDoc.html"
+    assert index.exists()
+    assert derived.exists()
+    assert index.read_text(encoding="utf-8") == derived.read_text(encoding="utf-8")
+
+
 def test_legacy_exports_use_unified_app(tmp_path):
     path = export_products_html(out_path=tmp_path / "ChemDoc.html")
     assert path.name == "ChemDoc.html"

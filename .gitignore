@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+data/derived/*.db
+data/derived/*.json
+data/derived/*.jsonl
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+doc/
+data/derived/ChemDoc-finder.html
+data/derived/ChemDoc-products.html
+data/derived/ChemDoc-xref.html

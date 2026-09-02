@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChemDoc Miner · iLENE 销售目录</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="grain"></div>
+  <header class="mast">
+    <div class="mast-left">
+      <p class="kicker">INTERNAL · POWER DREAM AMERICA</p>
+      <h1>CHEMDOC <span>MINER</span></h1>
+      <p class="deck">UV 丙烯酸酯 / 光引发剂销售目录 · TDS 原文检索 · 厂牌对标</p>
+    </div>
+    <div class="mast-right" id="stats">
+      <div class="stat"><b id="stat-products">—</b><span>型号</span></div>
+      <div class="stat"><b id="stat-eq">—</b><span>对标</span></div>
+      <div class="stat"><b id="stat-docs">—</b><span>文件</span></div>
+    </div>
+  </header>
+
+  <section class="console">
+    <label class="console-label" for="q">QUERY</label>
+    <input id="q" type="search" autocomplete="off" placeholder="问：iLENE 700 是什么 / Allnex EB3700 对应谁 / 低黄变 3D 打印树脂" />
+    <button id="go" type="button">查询</button>
+  </section>
+
+  <nav class="chips" id="chips"></nav>
+
+  <main class="stage">
+    <section class="rail">
+      <div class="answer" id="answer">
+        <p class="muted">输入型号、竞品牌号，或一段性能/应用需求。回答只依据目录里的 TDS 与对照表，不编造指标。</p>
+      </div>
+      <ol class="hits" id="hits"></ol>
+    </section>
+    <section class="sheet" id="sheet">
+      <div class="sheet-empty">
+        <p class="stencil">SPEC SHEET</p>
+        <p>选中左侧结果，查看物性、应用与对标。打开 TDS 核对数。</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    对标为内部销售对照，需配方验证。粘度等指标温度不同不可直接比较。资料仅供内网使用。
+  </footer>
+  <script src="/app.js"></script>
+</body>
+</html>

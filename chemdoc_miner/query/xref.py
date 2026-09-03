@@ -38,15 +38,18 @@ def expand_peers_with_hops(
     lookup: dict[str, list[dict[str, str]]],
     start_keys: set[str],
     *,
-    max_hops: int = 2,
+    max_hops: int | None = None,
+    hop_cap: int = 12,
 ) -> list[dict[str, Any]]:
-    """BFS peer expansion from one or more lookup keys (e.g. 8000 -> IGM 4771 -> AGI 008)."""
-    if max_hops < 1:
-        return []
+    """BFS peer expansion. max_hops=None expands until the graph is stable."""
     visited = set(start_keys)
     out: dict[str, dict[str, Any]] = {}
     frontier = list(start_keys)
-    for hop in range(1, max_hops + 1):
+    hop = 0
+    while frontier and (max_hops is None or hop < max_hops):
+        hop += 1
+        if hop > hop_cap:
+            break
         next_frontier: list[str] = []
         for key in frontier:
             for p in lookup.get(key, []):
@@ -65,7 +68,7 @@ def find_cross_refs(
     grade: str,
     *,
     conn: sqlite3.Connection | None = None,
-    max_hops: int = 2,
+    max_hops: int | None = None,
 ) -> dict[str, Any]:
     own = conn is None
     close = conn or connect()
@@ -139,12 +142,16 @@ def find_cross_refs(
         peers = expand_peers_with_hops(lookup, start_keys, max_hops=max_hops)
         hop1 = sum(1 for p in peers if p["hop"] == 1)
         hop2 = sum(1 for p in peers if p["hop"] == 2)
+        hop3plus = sum(1 for p in peers if p["hop"] >= 3)
+        max_hop_reached = max((p["hop"] for p in peers), default=0)
         return {
             "query": {"company": name, "grade": g},
             "peers": peers,
             "peer_count": len(peers),
             "hop1_count": hop1,
             "hop2_count": hop2,
+            "hop3plus_count": hop3plus,
+            "max_hop_reached": max_hop_reached,
             "max_hops": max_hops,
             "groups": groups_out,
             "disclaimer": "销售/化学对标参考，需配方验证。",

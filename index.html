@@ -298,7 +298,7 @@ button.link-btn:hover{border-color:var(--border-hover);background:var(--card-ele
 <button class="action" id="xref-go">Search</button>
 </div>
 <div class="results" id="xref-out"><div class="empty">Select company and enter a grade</div></div>
-<p class="hint">Sales/chemical cross-reference only. Formulation validation required. Results include direct (1-hop) and extended (2-hop) peers.</p>
+<p class="hint">Sales/chemical cross-reference only. Formulation validation required. Peers expand hop-by-hop until no new matches (max 12 hops).</p>
 </section>
 
 <nav class="app-nav" aria-label="Main">
@@ -732,7 +732,9 @@ function findXrefMatches(co, input) {
   const visited = new Set(startKeys);
   const peerMap = {};
   let frontier = [...startKeys];
-  for (let hop = 1; hop <= 2; hop++) {
+  let hop = 0;
+  while (frontier.length && hop < 12) {
+    hop++;
     const next = [];
     for (const key of frontier) {
       for (const p of xrefLookup[key] || []) {
@@ -751,7 +753,7 @@ function findXrefMatches(co, input) {
 }
 function renderXrefRow(p) {
   const pd = p.company === "Power Dream";
-  const hop = p.hop === 2 ? '<span class="hop-tag">2-hop</span>' : "";
+  const hop = p.hop > 1 ? '<span class="hop-tag">' + p.hop + '-hop</span>' : "";
   const right = pd
     ? '<button type="button" class="link-btn" onclick="openCatalog(\'' + esc(p.grade).replace(/'/g, "\\'") + '\', {returnTo:\'xref\'})">' + esc(p.grade) + '</button>'
     : '<span class="grade">' + esc(p.grade) + '</span>';
@@ -764,16 +766,17 @@ function renderXref() {
   if (!grade) { box.innerHTML = '<div class="empty">Enter a grade code</div>'; return; }
   const { matchedKeys, peers } = findXrefMatches(co, grade);
   if (!matchedKeys.length) { box.innerHTML = '<div class="empty">No match for ' + esc(co) + ' ' + esc(grade) + '</div>'; return; }
-  const hop1 = peers.filter(p => p.hop === 1);
-  const hop2 = peers.filter(p => p.hop === 2);
-  let html = '<div class="note">Matched: ' + matchedKeys.map(m => m.grade).join(", ") + '</div>';
+  const maxHop = peers.reduce((m, p) => Math.max(m, p.hop), 0);
+  let html = '<div class="note">Matched: ' + matchedKeys.map(m => m.grade).join(", ") +
+    (maxHop ? ' · ' + peers.length + ' peers · ' + maxHop + ' hops' : '') + '</div>';
   if (!peers.length) html += '<div class="empty">No cross-references</div>';
   else {
-    html += '<div class="section-hdr">Direct (1-hop) · ' + hop1.length + '</div>';
-    html += hop1.length ? hop1.map(renderXrefRow).join("") : '<div class="empty">None</div>';
-    if (hop2.length) {
-      html += '<div class="section-hdr">Extended (2-hop) · ' + hop2.length + '</div>';
-      html += hop2.map(renderXrefRow).join("");
+    for (let h = 1; h <= maxHop; h++) {
+      const slice = peers.filter(p => p.hop === h);
+      if (!slice.length) continue;
+      const label = h === 1 ? "Direct (1-hop)" : "Extended (" + h + "-hop)";
+      html += '<div class="section-hdr">' + label + ' · ' + slice.length + '</div>';
+      html += slice.map(renderXrefRow).join("");
     }
   }
   box.innerHTML = html;

@@ -63,6 +63,24 @@ def test_2hop_allnex_eb3700():
 def test_covestro_p50_xref():
     from chemdoc_miner.query.xref import find_cross_refs
 
-    r = find_cross_refs("Covestro", "P-50", max_hops=2)
+    r = find_cross_refs("Covestro", "P-50")
     assert r["peer_count"] >= 1
     assert any(p["company"] == "Power Dream" and p["grade"] == "LJ03250" for p in r["peers"])
+
+
+def test_stable_power_dream_8000():
+    from chemdoc_miner.query.xref import find_cross_refs
+
+    r = find_cross_refs("Power Dream", "8000")
+    assert r["max_hop_reached"] == 2
+    assert r["peer_count"] == 12
+    assert r["hop3plus_count"] == 0
+
+
+def test_stable_allnex_tpgda():
+    from chemdoc_miner.query.xref import find_cross_refs
+
+    r = find_cross_refs("Allnex", "TPGDA")
+    assert r["max_hop_reached"] == 5
+    assert r["peer_count"] == 33
+    assert r["hop3plus_count"] == 23

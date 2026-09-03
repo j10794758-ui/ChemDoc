@@ -224,11 +224,30 @@ def canonical_company(raw: str | None) -> str:
         return "Power Dream"
     if "ilene" in key:
         return "Power Dream"
+    # AgiSyn / DSM-AGI UV resins: keep ECR-aligned company key even when header says Covestro (AGI).
+    if "agi" in key and ("covestro" in key or "agisyn" in key):
+        return "AGI"
     for alias, name in sorted(_COMPANY_ALIASES.items(), key=lambda kv: -len(kv[0])):
         if alias in key:
             return name
     first = re.split(r"\s{2,}|\(|/", key)[0].strip()
     return _COMPANY_ALIASES.get(first, collapse_ws(str(raw)).title())
+
+
+def xref_member_company(header: str | None, raw_cell: str | None) -> str:
+    """Resolve xref member company from sheet column header and cell text."""
+    company = canonical_company(header)
+    raw = collapse_ws(str(raw_cell or ""))
+    if not raw:
+        return company
+    low = raw.lower()
+    if company == "AGI":
+        # German Covestro SKUs (e.g. Covestro P-50) are not AgiSyn / DSM-AGI products.
+        if re.match(r"covestro\s+p[\-\s]?\d", low):
+            return "Covestro"
+        if low.startswith("covestro") and "agisyn" not in low:
+            return "Covestro"
+    return company
 
 
 def looks_like_placeholder(value: str | None) -> bool:
@@ -311,6 +330,22 @@ def canonical_grade(raw: str | None, company: str | None = None, *, domain: str 
         if m:
             return f"JRCURE{m.group(1)}"
 
+    if name == "AGI":
+        m = re.match(r"(?i)(?:agisyn|agi[-\s]?syn)\s*[-]?\s*(\d+[a-z0-9]*)", text)
+        if m:
+            return normalize_grade(m.group(1))
+        compact = re.sub(r"\s+", "", text).upper()
+        m = re.match(r"(?i)AGISYN(\d+[A-Z0-9]*)", compact)
+        if m:
+            return normalize_grade(m.group(1))
+        if re.fullmatch(r"\d+[A-Z0-9]*", compact):
+            return normalize_grade(compact)
+
+    if name == "Covestro":
+        m = re.match(r"(?i)(?:covestro\s*)?p[\-\s]?(\d+)\s*$", collapse_ws(text))
+        if m:
+            return f"COVESTROP-{m.group(1)}"
+
     token = re.sub(r"\s+", "", text).upper()
     return normalize_grade(token) or token
 
@@ -339,6 +374,14 @@ def grade_query_variants(query: str, company: str | None = None, *, domain: str 
         for dom in ("offsets", "ecr", "pi", "additives"):
             if dom != domain:
                 add(q, dom)
+    if name == "AGI":
+        for pat in (
+            r"(?i)^agisyn\s*[-]?\s*(.+)$",
+            r"(?i)^agi\s*syn\s*[-]?\s*(.+)$",
+        ):
+            m = re.match(pat, q)
+            if m:
+                add(m.group(1), domain)
     stripped = q
     for prefix in (
         r"(?i)^photomer\s*",
@@ -360,6 +403,16 @@ def grade_query_variants(query: str, company: str | None = None, *, domain: str 
             stripped = rest
     if name == "Allnex" and re.fullmatch(r"\d+[A-Z0-9\-]*", re.sub(r"\s+", "", q), re.I):
         add("EB" + re.sub(r"\s+", "", q), domain)
+    if name == "Covestro" and re.search(r"(?i)agisyn", q):
+        for ag in grade_query_variants(q, "AGI", domain=domain):
+            if ag not in seen:
+                seen.add(ag)
+                out.append(ag)
+    if name == "Covestro":
+        m = re.match(r"(?i)(?:covestro\s*)?p[\-\s]?(\d+)\s*$", q)
+        if m:
+            add(f"COVESTROP-{m.group(1)}", domain)
+            add(f"P-{m.group(1)}", domain)
     return out
 
 

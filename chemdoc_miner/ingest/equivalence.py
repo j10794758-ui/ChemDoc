@@ -14,6 +14,7 @@ from chemdoc_miner.normalize import (
     looks_like_placeholder,
     normalize_grade,
     split_combo_grades,
+    xref_member_company,
 )
 from chemdoc_miner.paths import XLS_DIR
 
@@ -128,7 +129,7 @@ def load_equivalence_rows() -> list[dict[str, Any]]:
 
 
 def _offsets() -> list[EqGroup]:
-    path = XLS_DIR / "Offsets Management 2026.xlsx"
+    path = XLS_DIR / "Offsets Management 2026-2.xlsx"
     wb = load_workbook(path, read_only=False, data_only=True)
     ws = wb["Competitive Landscape"]
     data = list(ws.iter_rows(values_only=True))
@@ -153,10 +154,11 @@ def _offsets() -> list[EqGroup]:
             cell = row[col_index] if col_index < len(row) else None
             if looks_like_placeholder(cell):
                 continue
-            company = canonical_company(company_header)
+            company_header = header[col_index]
             raw = str(cell)
-            for grade in _split_cell(raw, company, domain="offsets"):
-                members.append(EqMember(company, grade, raw))
+            member_co = xref_member_company(company_header, raw)
+            for grade in _split_cell(raw, member_co, domain="offsets"):
+                members.append(EqMember(member_co, grade, raw))
         if not members:
             continue
         eq_key = f"OFFSET-{row_idx:03d}"
@@ -201,7 +203,7 @@ def _additives_sheet() -> list[EqGroup]:
             continue
         if not name or low in _META_HEADERS or low == "igm old name":
             continue
-        company_cols.append((i, canonical_company(name)))
+        company_cols.append((i, name))
     groups: list[EqGroup] = []
     for row in data[1:]:
         if not row:
@@ -214,13 +216,14 @@ def _additives_sheet() -> list[EqGroup]:
             raw = str(row[name_col])
             for grade in _split_cell(raw, "IGM", domain="additives"):
                 members.append(EqMember("IGM", grade, raw, role="product_code"))
-        for col_index, company in company_cols:
+        for col_index, company_header in company_cols:
             cell = row[col_index] if col_index < len(row) else None
             if looks_like_placeholder(cell):
                 continue
             raw = str(cell)
-            for grade in _split_cell(raw, company, domain="additives"):
-                members.append(EqMember(company, grade, raw))
+            member_co = xref_member_company(company_header, raw)
+            for grade in _split_cell(raw, member_co, domain="additives"):
+                members.append(EqMember(member_co, grade, raw))
         members = _dedupe_members(members)
         if not members:
             continue
@@ -266,7 +269,7 @@ def _wide_sheet(path: Path, sheet: str, domain: str) -> list[EqGroup]:
             continue
         if low in _META_HEADERS:
             continue
-        company_cols.append((i, canonical_company(name)))
+        company_cols.append((i, name))
     groups: list[EqGroup] = []
     for row in data[1:]:
         if not row:
@@ -278,13 +281,14 @@ def _wide_sheet(path: Path, sheet: str, domain: str) -> list[EqGroup]:
             collapse_ws(str(row[chem_group_col])) if chem_group_col is not None and row[chem_group_col] else None
         )
         members: list[EqMember] = []
-        for col_index, company in company_cols:
+        for col_index, company_header in company_cols:
             cell = row[col_index] if col_index < len(row) else None
             if looks_like_placeholder(cell):
                 continue
             raw = str(cell)
-            for grade in _split_cell(raw, company, domain=domain):
-                members.append(EqMember(company, grade, raw))
+            member_co = xref_member_company(company_header, raw)
+            for grade in _split_cell(raw, member_co, domain=domain):
+                members.append(EqMember(member_co, grade, raw))
         members = _dedupe_members(members)
         if not members:
             continue

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from typing import Any
 
 from chemdoc_miner.db import connect
 from chemdoc_miner.ingest.equivalence import EqGroup, EqMember, load_equivalence_groups
-from chemdoc_miner.normalize import canonical_company, collapse_ws, normalize_grade
+from chemdoc_miner.normalize import canonical_company, canonical_grade, collapse_ws, grade_query_variants, normalize_grade
 
 
 def member_key(company: str, grade: str) -> str:
@@ -33,11 +34,38 @@ def build_union_lookup(groups: list[EqGroup] | None = None) -> dict[str, list[di
     return lookup
 
 
+def expand_peers_with_hops(
+    lookup: dict[str, list[dict[str, str]]],
+    start_keys: set[str],
+    *,
+    max_hops: int = 2,
+) -> list[dict[str, Any]]:
+    """BFS peer expansion from one or more lookup keys (e.g. 8000 -> IGM 4771 -> AGI 008)."""
+    if max_hops < 1:
+        return []
+    visited = set(start_keys)
+    out: dict[str, dict[str, Any]] = {}
+    frontier = list(start_keys)
+    for hop in range(1, max_hops + 1):
+        next_frontier: list[str] = []
+        for key in frontier:
+            for p in lookup.get(key, []):
+                pk = member_key(p["company"], p["grade"])
+                if pk in visited:
+                    continue
+                visited.add(pk)
+                out[pk] = {"company": p["company"], "grade": p["grade"], "hop": hop}
+                next_frontier.append(pk)
+        frontier = next_frontier
+    return sorted(out.values(), key=lambda p: (p["hop"], p["company"], p["grade"]))
+
+
 def find_cross_refs(
     company: str,
     grade: str,
     *,
     conn: sqlite3.Connection | None = None,
+    max_hops: int = 2,
 ) -> dict[str, Any]:
     own = conn is None
     close = conn or connect()
@@ -50,9 +78,17 @@ def find_cross_refs(
         candidates: set[tuple[str, str]] = {(name, g)}
         for item in resolved:
             candidates.add((item["company"], item["grade"]))
+        for variant in grade_query_variants(grade, name):
+            candidates.add((name, variant))
+        if name in {"AGI", "Covestro"} or re.search(r"(?i)agisyn", grade):
+            for variant in grade_query_variants(grade, "AGI"):
+                candidates.add(("AGI", variant))
+            agi_grade = canonical_grade(grade, "AGI", domain="ecr")
+            if agi_grade:
+                candidates.add(("AGI", agi_grade))
 
         groups_out: list[dict[str, Any]] = []
-        union_peers: dict[str, dict[str, str]] = {}
+        seen_gids: set[int] = set()
 
         for cname, cgrade in candidates:
             rows = close.execute(
@@ -67,7 +103,6 @@ def find_cross_refs(
                 """,
                 (cname, cgrade, cgrade.replace(" ", "")),
             ).fetchall()
-            seen_gids: set[int] = set()
             for row in rows:
                 gid = row["group_id"]
                 if gid in seen_gids:
@@ -98,21 +133,19 @@ def find_cross_refs(
                         "members": members,
                     }
                 )
-                if row["member_count"] >= 2:
-                    for m in members:
-                        if m["company"].lower() == cname.lower() and m["grade"].upper() == cgrade.upper():
-                            continue
-                        pk = member_key(m["company"], m["grade"])
-                        union_peers[pk] = {"company": m["company"], "grade": m["grade"]}
 
-        for cname, cgrade in candidates:
-            union_peers.pop(member_key(cname, cgrade), None)
-
-        peers = sorted(union_peers.values(), key=lambda p: (p["company"], p["grade"]))
+        lookup = build_union_lookup_from_db(close)
+        start_keys = {member_key(cname, cgrade) for cname, cgrade in candidates}
+        peers = expand_peers_with_hops(lookup, start_keys, max_hops=max_hops)
+        hop1 = sum(1 for p in peers if p["hop"] == 1)
+        hop2 = sum(1 for p in peers if p["hop"] == 2)
         return {
             "query": {"company": name, "grade": g},
             "peers": peers,
             "peer_count": len(peers),
+            "hop1_count": hop1,
+            "hop2_count": hop2,
+            "max_hops": max_hops,
             "groups": groups_out,
             "disclaimer": "销售/化学对标参考，需配方验证。",
         }

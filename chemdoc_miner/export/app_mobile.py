@@ -256,6 +256,7 @@ button.link-btn:hover{border-color:var(--border-hover);background:var(--card-ele
 }
 .hint{margin-top:14px;font-size:.76rem;color:var(--text-muted);line-height:1.5;font-weight:400}
 #catalog-search-out .empty,#finder-out .empty{margin-top:12px;border:1px solid var(--border)}
+.hop-tag{font-size:.72rem;color:var(--text-muted);font-weight:500;margin-left:8px}
 .hidden{display:none!important}
 @media (max-width:520px){
   body{padding:14px 14px calc(var(--nav-h) + 14px)}
@@ -309,7 +310,7 @@ button.link-btn:hover{border-color:var(--border-hover);background:var(--card-ele
 <button class="action" id="xref-go">Search</button>
 </div>
 <div class="results" id="xref-out"><div class="empty">Select company and enter a grade</div></div>
-<p class="hint">Sales/chemical cross-reference only. Formulation validation required.</p>
+<p class="hint">Sales/chemical cross-reference only. Formulation validation required. Results include direct (1-hop) and extended (2-hop) peers.</p>
 </section>
 
 <nav class="app-nav" aria-label="Main">
@@ -710,7 +711,12 @@ function resetFinder() {
 function mkKey(co, g) { return co + "|" + String(g).toUpperCase().replace(/\s+/g, ""); }
 function stripPrefixes(co, q) {
   let text = q.trim();
-  const patterns = { IGM: [/^(?:photomer|ph|omnirad|esacure)\s*/i], Allnex: [/^(?:ebecryl|eb|additol)\s*/i], Sartomer: [/^(?:sr|cn|mcure|m-cure)\s*/i] };
+  const patterns = {
+    IGM: [/^(?:photomer|ph|omnirad|esacure)\s*/i],
+    Allnex: [/^(?:ebecryl|eb|additol)\s*/i],
+    Sartomer: [/^(?:sr|cn|mcure|m-cure)\s*/i],
+    Covestro: [/^(?:covestro)\s*/i],
+  };
   (patterns[co] || []).forEach(re => { text = text.replace(re, ""); });
   return text.trim();
 }
@@ -720,25 +726,48 @@ function queryVariants(co, input) {
   function add(g) { const n = norm(g); if (n && !seen.has(n)) { seen.add(n); out.push(n); } }
   add(q); add(stripPrefixes(co, q));
   if (co === "Allnex" && /^\d+[A-Z0-9\-]*$/i.test(norm(q))) add("EB" + norm(q));
+  if (co === "Covestro") {
+    const m = q.match(/^(?:covestro\s*)?p-?(\d+)$/i);
+    if (m) { add("COVESTROP-" + m[1]); add("P-" + m[1]); }
+  }
   return out;
 }
 function findXrefMatches(co, input) {
   const variants = queryVariants(co, input);
-  const matchedKeys = [], peerMap = {};
+  const lookupKeys = new Set();
+  variants.forEach(v => lookupKeys.add(mkKey(co, v)));
+  const matchedKeys = [];
   for (const v of variants) {
-    const key = mkKey(co, v);
-    if (xrefLookup[key]) matchedKeys.push({ grade: v, kind: "exact" });
+    if (xrefLookup[mkKey(co, v)]) matchedKeys.push({ grade: v, kind: "exact" });
   }
-  const exact = matchedKeys.filter(m => m.kind === "exact");
-  const seenKey = new Set();
-  for (const item of exact) {
-    const key = mkKey(co, item.grade);
-    if (seenKey.has(key)) continue;
-    seenKey.add(key);
-    for (const p of xrefLookup[key] || []) peerMap[p.company + "|" + p.grade] = p;
+  const startKeys = lookupKeys;
+  const visited = new Set(startKeys);
+  const peerMap = {};
+  let frontier = [...startKeys];
+  for (let hop = 1; hop <= 2; hop++) {
+    const next = [];
+    for (const key of frontier) {
+      for (const p of xrefLookup[key] || []) {
+        const pk = mkKey(p.company, p.grade);
+        if (visited.has(pk)) continue;
+        visited.add(pk);
+        peerMap[pk] = { company: p.company, grade: p.grade, hop: hop };
+        next.push(pk);
+      }
+    }
+    frontier = next;
   }
-  for (const v of variants) delete peerMap[mkKey(co, v)];
-  return { matchedKeys, peers: Object.values(peerMap).sort((a,b) => a.company.localeCompare(b.company) || a.grade.localeCompare(b.grade)) };
+  const peers = Object.values(peerMap).sort((a, b) =>
+    (a.hop - b.hop) || a.company.localeCompare(b.company) || a.grade.localeCompare(b.grade));
+  return { matchedKeys: matchedKeys.filter(m => m.kind === "exact"), peers };
+}
+function renderXrefRow(p) {
+  const pd = p.company === "Power Dream";
+  const hop = p.hop === 2 ? '<span class="hop-tag">2-hop</span>' : "";
+  const right = pd
+    ? '<button type="button" class="link-btn" onclick="openCatalog(\'' + esc(p.grade).replace(/'/g, "\\'") + '\', {returnTo:\'xref\'})">' + esc(p.grade) + '</button>'
+    : '<span class="grade">' + esc(p.grade) + '</span>';
+  return '<div class="row"><span class="co">' + esc(p.company) + hop + '</span>' + right + '</div>';
 }
 function renderXref() {
   const co = $("xref-company").value;
@@ -747,15 +776,18 @@ function renderXref() {
   if (!grade) { box.innerHTML = '<div class="empty">Enter a grade code</div>'; return; }
   const { matchedKeys, peers } = findXrefMatches(co, grade);
   if (!matchedKeys.length) { box.innerHTML = '<div class="empty">No match for ' + esc(co) + ' ' + esc(grade) + '</div>'; return; }
+  const hop1 = peers.filter(p => p.hop === 1);
+  const hop2 = peers.filter(p => p.hop === 2);
   let html = '<div class="note">Matched: ' + matchedKeys.map(m => m.grade).join(", ") + '</div>';
   if (!peers.length) html += '<div class="empty">No cross-references</div>';
-  else html += peers.map(p => {
-    const pd = p.company === "Power Dream";
-    const right = pd
-      ? '<button type="button" class="link-btn" onclick="openCatalog(\'' + esc(p.grade).replace(/'/g, "\\'") + '\', {returnTo:\'xref\'})">' + esc(p.grade) + '</button>'
-      : '<span class="grade">' + esc(p.grade) + '</span>';
-    return '<div class="row"><span class="co">' + esc(p.company) + '</span>' + right + '</div>';
-  }).join("");
+  else {
+    html += '<div class="section-hdr">Direct (1-hop) · ' + hop1.length + '</div>';
+    html += hop1.length ? hop1.map(renderXrefRow).join("") : '<div class="empty">None</div>';
+    if (hop2.length) {
+      html += '<div class="section-hdr">Extended (2-hop) · ' + hop2.length + '</div>';
+      html += hop2.map(renderXrefRow).join("");
+    }
+  }
   box.innerHTML = html;
 }
 

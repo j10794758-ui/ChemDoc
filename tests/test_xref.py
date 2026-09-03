@@ -38,3 +38,31 @@ def test_union_lookup_sr351():
     assert len(peers) >= 5
     companies = {p["company"] for p in peers}
     assert "IGM" in companies or "Allnex" in companies
+
+
+def test_2hop_power_dream_8000():
+    from chemdoc_miner.query.xref import find_cross_refs
+
+    r1 = find_cross_refs("Power Dream", "8000", max_hops=1)
+    r2 = find_cross_refs("Power Dream", "8000", max_hops=2)
+    assert r2["hop1_count"] == len(r1["peers"])
+    assert r2["hop2_count"] >= 1
+    hop2 = {(p["company"], p["grade"]) for p in r2["peers"] if p["hop"] == 2}
+    assert ("AGI", "008") in hop2 or ("Qualipoly", "GC1100Z") in hop2
+
+
+def test_2hop_allnex_eb3700():
+    from chemdoc_miner.query.xref import find_cross_refs
+
+    r = find_cross_refs("Allnex", "EB3700", max_hops=2)
+    hop1 = {(p["company"], p["grade"]) for p in r["peers"] if p["hop"] == 1}
+    assert ("Power Dream", "700") in hop1
+    assert r["peer_count"] >= len(hop1)
+
+
+def test_covestro_p50_xref():
+    from chemdoc_miner.query.xref import find_cross_refs
+
+    r = find_cross_refs("Covestro", "P-50", max_hops=2)
+    assert r["peer_count"] >= 1
+    assert any(p["company"] == "Power Dream" and p["grade"] == "LJ03250" for p in r["peers"])

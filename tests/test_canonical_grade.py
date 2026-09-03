@@ -34,3 +34,17 @@ def test_related_3016_variants():
     assert "3016LT" in rel
     assert "3016-25G" in rel
     assert "4006" not in rel
+
+
+def test_agi_agisyn_to_numeric():
+    assert canonical_grade("AgiSyn 008", "AGI", domain="ecr") == "008"
+    assert canonical_grade("008", "AGI", domain="ecr") == "008"
+    assert canonical_grade("AGISYN008", "AGI", domain="offsets") == "008"
+    assert "008" in grade_query_variants("AgiSyn 008", "AGI")
+    assert "008" in grade_query_variants("AgiSyn 008", "Covestro")
+
+
+def test_covestro_p50_variants():
+    assert canonical_grade("P-50", "Covestro") == "COVESTROP-50"
+    assert canonical_grade("Covestro P-50", "Covestro") == "COVESTROP-50"
+    assert "COVESTROP-50" in grade_query_variants("P-50", "Covestro")

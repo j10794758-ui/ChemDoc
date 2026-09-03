@@ -1,4 +1,12 @@
-from chemdoc_miner.normalize import canonical_company, grade_from_filename, normalize_grade, parse_date
+from chemdoc_miner.normalize import (
+    canonical_company,
+    canonical_grade,
+    grade_from_filename,
+    grade_query_variants,
+    normalize_grade,
+    parse_date,
+    xref_member_company,
+)
 
 
 def test_normalize_numeric_suffix():
@@ -42,3 +50,12 @@ def test_company():
     assert canonical_company("PHOTOMER") == "IGM"
     assert canonical_company("Power Dream America Inc") == "Power Dream"
     assert canonical_company("RAHN                       Genomer") == "RAHN"
+    assert canonical_company("Covestro (AGI)") == "AGI"
+    assert canonical_company("AGI                         AgiSyn") == "AGI"
+    assert canonical_company("Covestro") == "Covestro"
+
+
+def test_xref_member_company_agi_covestro_split():
+    assert xref_member_company("Covestro (AGI)", "AgiSyn 008") == "AGI"
+    assert xref_member_company("Covestro (AGI)", "Covestro P-50") == "Covestro"
+    assert xref_member_company("AGI                         AgiSyn", "008") == "AGI"

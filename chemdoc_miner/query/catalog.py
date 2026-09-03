@@ -46,6 +46,7 @@ def _slim_product(product: dict[str, Any]) -> dict[str, Any]:
         "grade_display": product.get("grade_display"),
         "family": product.get("family"),
         "family_label": product.get("family_label"),
+        "family_en": product.get("family_en"),
         "cas": product.get("cas"),
         "chemical_name": product.get("chemical_name"),
         "description": restore_pdf_spaces(product.get("description")),

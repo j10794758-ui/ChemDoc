@@ -508,7 +508,7 @@ function renderTechnical(p) {
 }
 function renderProductDetail(p) {
   const sw = p.signal_word || (p.sds_summary && p.sds_summary.label_elements && p.sds_summary.label_elements.signal_word);
-  const meta = [p.family_label || p.family, p.cas ? "CAS " + p.cas : "", p.revised_date ? "TDS " + p.revised_date : ""].filter(Boolean).join(" · ");
+  const meta = [p.family_en || p.family, p.cas ? "CAS " + p.cas : "", p.revised_date ? "TDS " + p.revised_date : ""].filter(Boolean).join(" · ");
   const uid = "pd" + Date.now();
   $("catalog-detail-out").innerHTML =
     '<div class="card"><div class="hrow"><div><div class="title">' + esc(p.grade_display || p.grade) + signalBadge(sw) + '</div><div class="meta">' + esc(meta) + '</div></div></div>' +

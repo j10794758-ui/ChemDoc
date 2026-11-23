@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from shutil import copyfile
 
@@ -861,13 +862,18 @@ def _export_catalog_pdfs(
     copied = {}
     doc_root = DOC_DIR.resolve()
     sources = {}
+    source_hashes = {}
+    source_names = {}
     for directory in (TDS_DIR, SDS_DIR):
         for candidate in sorted(directory.glob("*")):
             source = candidate.resolve()
             if not source.is_relative_to(doc_root) or "Ignore this folder" in source.parts:
                 continue
             if source.suffix.lower() == ".pdf" and source.is_file():
-                sources.setdefault(sha256_file(source), source)
+                digest = sha256_file(source)
+                sources.setdefault(digest, source)
+                source_hashes[source] = digest
+                source_names[(source.parent, source.name.casefold())] = source
 
     for product in catalog["products"].values():
         for kind in ("tds", "sds"):
@@ -878,15 +884,20 @@ def _export_catalog_pdfs(
             source = sources.get(digest)
             if source is None:
                 continue
+            primary_stem = re.sub(rf"({kind})_?[23]$", r"\1", source.stem, flags=re.IGNORECASE)
+            preferred = source_names.get(
+                (source.parent, (primary_stem + source.suffix).casefold()), source
+            )
+            digest = source_hashes[preferred]
             key = (kind, digest)
             if key not in copied:
                 url = f"pdf/{kind}/{digest}.pdf"
                 for output_dir in output_dirs:
                     destination = output_dir / url
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    copyfile(source, destination)
+                    copyfile(preferred, destination)
                 copied[key] = url
-            product[f"{kind}_pdf"] = {"url": copied[key], "filename": Path(raw_path).name}
+            product[f"{kind}_pdf"] = {"url": copied[key], "filename": preferred.name}
 
 
 def export_app_html(out_path: Path | None = None) -> Path:

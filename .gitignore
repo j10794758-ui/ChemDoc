@@ -10,6 +10,8 @@ data/derived/*.jsonl
 dist/
 build/
 doc/
+/pdf/
+/data/derived/pdf/
 data/derived/ChemDoc-finder.html
 data/derived/ChemDoc-products.html
 data/derived/ChemDoc-xref.html

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from shutil import copyfile
 
 from chemdoc_miner.db import connect
 from chemdoc_miner.export.ghs_assets import ghs_pictogram_json
-from chemdoc_miner.paths import DATA_DIR, ROOT
+from chemdoc_miner.ingest.inventory import sha256_file
+from chemdoc_miner.paths import DATA_DIR, DOC_DIR, ROOT, SDS_DIR, TDS_DIR
 from chemdoc_miner.query.catalog import export_catalog_json
 from chemdoc_miner.query.finder import build_finder_index
 from chemdoc_miner.query.xref import export_lookup_json, xref_stats
@@ -139,6 +141,7 @@ button.link-btn{
   transition:border-color .15s ease,background .15s ease;
 }
 button.link-btn:hover{border-color:var(--border-hover);background:var(--card-elevated)}
+.pdf-download{display:inline-flex;align-items:center;min-height:44px;margin-bottom:8px;color:var(--text);text-decoration:underline}
 .panel{
   background:var(--card);border:1px solid var(--border);
   border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;
@@ -507,6 +510,13 @@ function renderTechnical(p) {
   if (p.storage) html += '<div class="section"><h3>Storage</h3><p>' + esc(p.storage) + '</p></div>';
   return html;
 }
+function renderPdfDownload(p, kind) {
+  if (!p[kind + "_path"]) return "";
+  const pdf = p[kind + "_pdf"];
+  if (!pdf) return '<p class="meta">PDF unavailable</p>';
+  return '<a class="pdf-download" href="' + esc(pdf.url) + '" download="' + esc(pdf.filename) +
+    '">↓ Download ' + kind.toUpperCase() + ' (PDF)</a>';
+}
 function renderProductDetail(p) {
   const sw = p.signal_word || (p.sds_summary && p.sds_summary.label_elements && p.sds_summary.label_elements.signal_word);
   const meta = [p.family_en || p.family, p.cas ? "CAS " + p.cas : "", p.revised_date ? "TDS " + p.revised_date : ""].filter(Boolean).join(" · ");
@@ -514,8 +524,8 @@ function renderProductDetail(p) {
   $("catalog-detail-out").innerHTML =
     '<div class="card"><div class="hrow"><div><div class="title">' + esc(p.grade_display || p.grade) + signalBadge(sw) + '</div><div class="meta">' + esc(meta) + '</div></div></div>' +
     '<div class="tabs"><button class="tab on" data-pane="tech">Technical (TDS)</button><button class="tab" data-pane="safe">Safety (SDS)</button></div>' +
-    '<div class="pane on" id="' + uid + '-tech">' + renderTechnical(p) + '</div>' +
-    '<div class="pane" id="' + uid + '-safe">' + renderSafety(p) + '</div></div>';
+    '<div class="pane on" id="' + uid + '-tech">' + renderPdfDownload(p, "tds") + renderTechnical(p) + '</div>' +
+    '<div class="pane" id="' + uid + '-safe">' + renderPdfDownload(p, "sds") + renderSafety(p) + '</div></div>';
   $("catalog-detail-out").querySelectorAll(".tab").forEach(btn => {
     btn.onclick = () => {
       $("catalog-detail-out").querySelectorAll(".tab").forEach(t => t.classList.remove("on"));
@@ -845,15 +855,58 @@ routeFromHash();
 """
 
 
+def _export_catalog_pdfs(
+    catalog: dict, document_hashes: dict[str, str], output_dirs: set[Path]
+) -> None:
+    copied = {}
+    doc_root = DOC_DIR.resolve()
+    sources = {}
+    for directory in (TDS_DIR, SDS_DIR):
+        for candidate in sorted(directory.glob("*")):
+            source = candidate.resolve()
+            if not source.is_relative_to(doc_root) or "Ignore this folder" in source.parts:
+                continue
+            if source.suffix.lower() == ".pdf" and source.is_file():
+                sources.setdefault(sha256_file(source), source)
+
+    for product in catalog["products"].values():
+        for kind in ("tds", "sds"):
+            raw_path = product.get(f"{kind}_path")
+            if not raw_path or "Ignore this folder" in Path(raw_path).parts:
+                continue
+            digest = document_hashes.get(raw_path)
+            source = sources.get(digest)
+            if source is None:
+                continue
+            key = (kind, digest)
+            if key not in copied:
+                url = f"pdf/{kind}/{digest}.pdf"
+                for output_dir in output_dirs:
+                    destination = output_dir / url
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    copyfile(source, destination)
+                copied[key] = url
+            product[f"{kind}_pdf"] = {"url": copied[key], "filename": Path(raw_path).name}
+
+
 def export_app_html(out_path: Path | None = None) -> Path:
     conn = connect()
     try:
         catalog = export_catalog_json(conn)
+        document_hashes = dict(conn.execute("SELECT path, sha256 FROM documents WHERE sha256 IS NOT NULL"))
         finder = json.dumps(build_finder_index(conn), ensure_ascii=False)
         xref = export_lookup_json(conn)
         stats = xref_stats(conn)
     finally:
         conn.close()
+
+    target = out_path or (DATA_DIR / "ChemDoc.html")
+    output_dirs = {target.parent.resolve()}
+    if out_path is None:
+        output_dirs.add(ROOT)
+    catalog_payload = json.loads(catalog)
+    _export_catalog_pdfs(catalog_payload, document_hashes, output_dirs)
+    catalog = json.dumps(catalog_payload, ensure_ascii=False).replace("<", "\\u003c")
 
     html = (
         APP_HTML.replace("__CATALOG_JSON__", catalog)
@@ -861,7 +914,6 @@ def export_app_html(out_path: Path | None = None) -> Path:
         .replace("__LOOKUP_JSON__", xref)
         .replace("__GHS_PICTO_JSON__", ghs_pictogram_json())
     )
-    target = out_path or (DATA_DIR / "ChemDoc.html")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(html, encoding="utf-8")
 

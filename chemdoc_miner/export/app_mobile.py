@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from shutil import copyfile
 
 from chemdoc_miner.db import connect
 from chemdoc_miner.export.ghs_assets import ghs_pictogram_json
-from chemdoc_miner.ingest.inventory import sha256_file
+from chemdoc_miner.ingest.inventory import sha256_file, unnumbered_pdf_stem
+from chemdoc_miner.ingest.pdf_text import extract_pdf_text
+from chemdoc_miner.ingest.sds import parse_sds
+from chemdoc_miner.ingest.tds import parse_tds
+from chemdoc_miner.normalize import restore_pdf_spaces
 from chemdoc_miner.paths import DATA_DIR, DOC_DIR, ROOT, SDS_DIR, TDS_DIR
 from chemdoc_miner.query.catalog import export_catalog_json
-from chemdoc_miner.query.finder import build_finder_index
+from chemdoc_miner.query.finder import build_finder_index_from_products
 from chemdoc_miner.query.xref import export_lookup_json, xref_stats
 
 APP_HTML = r"""<!DOCTYPE html>
@@ -860,6 +863,7 @@ def _export_catalog_pdfs(
     catalog: dict, document_hashes: dict[str, str], output_dirs: set[Path]
 ) -> None:
     copied = {}
+    parsed_versions = {}
     doc_root = DOC_DIR.resolve()
     sources = {}
     source_hashes = {}
@@ -884,11 +888,26 @@ def _export_catalog_pdfs(
             source = sources.get(digest)
             if source is None:
                 continue
-            primary_stem = re.sub(rf"({kind})_?[23]$", r"\1", source.stem, flags=re.IGNORECASE)
+            primary_stem = unnumbered_pdf_stem(source.stem, kind)
             preferred = source_names.get(
                 (source.parent, (primary_stem + source.suffix).casefold()), source
             )
-            digest = source_hashes[preferred]
+            preferred_digest = source_hashes[preferred]
+            if preferred_digest != digest:
+                version_key = (kind, preferred_digest)
+                if version_key not in parsed_versions:
+                    raw_text, _, _ = extract_pdf_text(preferred, x_tolerance=1)
+                    parser = parse_tds if kind == "tds" else parse_sds
+                    parsed_versions[version_key] = parser(raw_text, preferred.name)
+                parsed = parsed_versions[version_key]
+                if kind == "tds":
+                    for field in ("description", "package", "storage"):
+                        product[field] = restore_pdf_spaces(parsed.get(field))
+                    for field in ("highlights", "applications", "properties", "revised_date"):
+                        product[field] = parsed.get(field)
+                else:
+                    product.update(signal_word=parsed["signal_word"], sds_summary=parsed["sds_summary"])
+            digest = preferred_digest
             key = (kind, digest)
             if key not in copied:
                 url = f"pdf/{kind}/{digest}.pdf"
@@ -905,7 +924,6 @@ def export_app_html(out_path: Path | None = None) -> Path:
     try:
         catalog = export_catalog_json(conn)
         document_hashes = dict(conn.execute("SELECT path, sha256 FROM documents WHERE sha256 IS NOT NULL"))
-        finder = json.dumps(build_finder_index(conn), ensure_ascii=False)
         xref = export_lookup_json(conn)
         stats = xref_stats(conn)
     finally:
@@ -918,6 +936,9 @@ def export_app_html(out_path: Path | None = None) -> Path:
     catalog_payload = json.loads(catalog)
     _export_catalog_pdfs(catalog_payload, document_hashes, output_dirs)
     catalog = json.dumps(catalog_payload, ensure_ascii=False).replace("<", "\\u003c")
+    finder = json.dumps(
+        build_finder_index_from_products(catalog_payload["products"].values()), ensure_ascii=False
+    ).replace("<", "\\u003c")
 
     html = (
         APP_HTML.replace("__CATALOG_JSON__", catalog)

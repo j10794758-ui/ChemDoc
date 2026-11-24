@@ -387,7 +387,7 @@ def _components(sec3: str) -> list[dict[str, str]]:
         if "chemical component" in lower or "concentration" in lower and "cas" in lower:
             continue
         match = re.match(
-            r"^(.+?)\s+([\d.<>\-]+(?:-[\d.]+)?%?|≥[\d.]+%?|-)\s+(\d{2,7}-\d{2}-\d|-)\s*$",
+            r"^(.+?)\s+([\d.<>~≤≥\-]+(?:-[\d.]+)?%?|-)\s+(\d{2,7}-\d{2}-\d|-)\s*$",
             line,
             re.I,
         )
@@ -462,21 +462,26 @@ def _parse_stability(sec10: str) -> tuple[list[str], str | None]:
 def _parse_transport(sec14: str) -> dict[str, Any]:
     if not sec14:
         return {}
+    sec14 = re.sub(r"(?m)^[ \t]*\d+[ \t]*/[ \t]*\d+[ \t]*$", "", sec14)
     un_match = re.search(r"UN\s*(?:No\.?|Number)?\s*[:：]?\s*(?:UN\s*)?(\d{4})", sec14, re.I)
     not_regulated = bool(
         re.search(r"not (?:classified|regulated|a dangerous|restricted)", sec14, re.I)
     )
-    shipping = _field_until(sec14, r"(?:Normal Shipping name|Proper shipping name)\s*:", _FIELD_STOP)
-    hazard_class = _field_until(sec14, r"(?:Hazard Classification|Transport hazard class)\s*:", _FIELD_STOP)
-    packing = _field_until(sec14, r"Packing Category\s*:", _FIELD_STOP)
-    marine = re.search(r"Marine Pollutants?\s*:\s*(.+)", sec14, re.I)
-    marine_val = collapse_ws(marine.group(1)).lower() if marine else ""
+    stop = r"\n\s*(?:(?:UN |United Nations )?(?:Normal Shipping name|Proper shipping name|Hazard Classification|Transport hazard class)|Packing (?:Category|Group|Sign)|Marine Pollutants?|Precautions for Transportation)\s*:"
+    shipping = _field_until(sec14, r"(?:Normal Shipping name|Proper shipping name)\s*:", stop)
+    hazard_class = _field_until(sec14, r"(?:Hazard Classification|Transport hazard class)\s*:", stop)
+    packing = _field_until(sec14, r"Packing (?:Category|Group)\s*:", stop)
+    if packing:
+        group = re.search(r"\b(?:III|II|I)\b", packing, re.I)
+        packing = group.group(0).upper() if group else packing
+    marine = _field_until(sec14, r"Marine Pollutants?\s*:", stop)
+    marine_val = (marine or "").rstrip(".").lower()
     return {
         "un_number": f"UN{un_match.group(1)}" if un_match else None,
         "proper_shipping_name": shipping,
         "hazard_class": hazard_class,
         "packing_group": packing,
-        "marine_pollutant": "applicable" in marine_val or "yes" in marine_val,
+        "marine_pollutant": marine_val in {"applicable", "yes"},
         "not_regulated": not_regulated and not un_match,
     }
 

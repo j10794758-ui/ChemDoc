@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 from collections import Counter
+from collections.abc import Iterable
 from typing import Any
 
 from chemdoc_miner.glossary import FAMILY_EN
@@ -27,12 +28,17 @@ _STOP = {
 
 
 def build_finder_index(conn: sqlite3.Connection) -> dict[str, Any]:
-    rows = conn.execute("SELECT * FROM products ORDER BY grade").fetchall()
+    rows = conn.execute("SELECT * FROM products ORDER BY grade")
+    return build_finder_index_from_products(_row_to_product(row) for row in rows)
+
+
+def build_finder_index_from_products(
+    catalog_products: Iterable[dict[str, Any] | None],
+) -> dict[str, Any]:
     products: dict[str, dict[str, Any]] = {}
     app_counter: Counter[str] = Counter()
 
-    for row in rows:
-        product = _row_to_product(row)
+    for product in catalog_products:
         if not product:
             continue
         grade = product["grade"]

@@ -4,11 +4,12 @@ import json
 import re
 import sqlite3
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 from chemdoc_miner.db import connect, rebuild
 from chemdoc_miner.ingest.equivalence import iter_alias_hints, load_equivalence_groups, load_equivalence_rows
-from chemdoc_miner.ingest.inventory import mark_canonical, scan_documents, write_inventory
+from chemdoc_miner.ingest.inventory import mark_canonical, scan_documents, unnumbered_pdf_stem, write_inventory
 from chemdoc_miner.normalize import normalize_grade
 
 
@@ -65,13 +66,18 @@ def _insert_documents(conn: sqlite3.Connection, records: list[dict[str, Any]]) -
 def _insert_products(conn: sqlite3.Connection, records: list[dict[str, Any]]) -> None:
     by_grade: dict[str, dict[str, Any]] = {}
     extras: dict[str, dict[str, Any]] = defaultdict(dict)
-    for rec in records:
-        grade = rec.get("grade")
-        if not grade:
+    readable = {record["path"].casefold(): record for record in records if record["extractable"]}
+    for record in records:
+        grade = record.get("grade")
+        if not grade or not record.get("is_canonical"):
             continue
+        path = Path(record["path"])
+        primary_stem = unnumbered_pdf_stem(path.stem, record["kind"])
+        primary_path = path.with_name(primary_stem + path.suffix)
+        rec = readable.get(str(primary_path).casefold(), record)
         parsed = rec.get("parsed") or {}
         bucket = extras[grade]
-        if rec["kind"] == "tds" and rec.get("is_canonical"):
+        if rec["kind"] == "tds":
             by_grade[grade] = {
                 "grade": grade,
                 "grade_display": parsed.get("grade_display") or f"iLENE {grade}",
@@ -91,7 +97,7 @@ def _insert_products(conn: sqlite3.Connection, records: list[dict[str, Any]]) ->
                 "tds_text": parsed.get("raw_text") or "",
                 "confidence": parsed.get("confidence") or 0,
             }
-        if rec["kind"] == "sds" and rec.get("is_canonical"):
+        if rec["kind"] == "sds":
             bucket["sds_path"] = rec["path"]
             bucket["sds_text"] = parsed.get("raw_text") or ""
             bucket["ghs"] = json.dumps(parsed.get("ghs") or [], ensure_ascii=False)

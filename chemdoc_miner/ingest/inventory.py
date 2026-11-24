@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,12 +33,16 @@ def kind_from_path(path: Path) -> str:
     return "tds"
 
 
+def unnumbered_pdf_stem(stem: str, kind: str) -> str:
+    return re.sub(rf"({re.escape(kind)})_?[23]$", r"\1", stem, flags=re.IGNORECASE)
+
+
 def scan_documents() -> list[dict[str, Any]]:
     files = sorted(TDS_DIR.glob("*.pdf")) + sorted(SDS_DIR.glob("*.pdf"))
     records: list[dict[str, Any]] = []
     for path in files:
         kind = kind_from_path(path)
-        text, pages, method = extract_pdf_text(path)
+        text, pages, method = extract_pdf_text(path, x_tolerance=1)
         if kind == "sds":
             parsed = parse_sds(text, path.name)
         else:
@@ -63,7 +68,7 @@ def scan_documents() -> list[dict[str, Any]]:
 
 
 def mark_canonical(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Pick one canonical document per (kind, grade); newest revised_date wins."""
+    """Prefer usable, unnumbered PDFs, then rank by revision date."""
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for rec in records:
         grouped.setdefault((rec["kind"], rec["grade"] or rec["filename"]), []).append(rec)
@@ -72,6 +77,7 @@ def mark_canonical(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             group,
             key=lambda r: (
                 1 if r["extractable"] else 0,
+                Path(r["filename"]).stem == unnumbered_pdf_stem(Path(r["filename"]).stem, r["kind"]),
                 date_sort_key(r.get("revised_date")),
                 r.get("text_len") or 0,
                 -len(r["filename"]),

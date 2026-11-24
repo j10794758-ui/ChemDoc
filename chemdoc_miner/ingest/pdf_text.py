@@ -7,11 +7,13 @@ from pathlib import Path
 import pdfplumber
 
 
-def extract_pdf_text(path: Path, *, ocr_if_empty: bool = True) -> tuple[str, int, str]:
+def extract_pdf_text(
+    path: Path, *, ocr_if_empty: bool = True, x_tolerance: float = 3
+) -> tuple[str, int, str]:
     """Return (text, page_count, method). method is 'text' or 'ocr'."""
     with pdfplumber.open(path) as pdf:
         page_count = len(pdf.pages)
-        parts = [(page.extract_text() or "") for page in pdf.pages]
+        parts = [(page.extract_text(x_tolerance=x_tolerance) or "") for page in pdf.pages]
         text = "\n".join(parts).strip()
     if len(text) >= 40:
         return text, page_count, "text"

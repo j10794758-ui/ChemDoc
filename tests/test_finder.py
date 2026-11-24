@@ -12,7 +12,8 @@ def test_finder_index_has_products():
         index = build_finder_index(conn)
     finally:
         conn.close()
-    assert index["count"] >= 290
+    # Improved PDF spacing merges legacy SDS-only duplicates into their existing grades.
+    assert index["count"] >= 280
     assert "coatings" in {a["id"] for a in index["applications_vocab"]}
     assert "2230" in index["products"] or "2230" in {p["grade"].upper() for p in index["products"].values()}
 

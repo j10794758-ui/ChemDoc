@@ -124,6 +124,7 @@ def _split_pda_sections(text: str) -> dict[str, str]:
         "specifications",
         "performance highlights",
         "applications",
+        "usage",
         "package",
         "chemical name",
         "storage and handling",
@@ -365,7 +366,16 @@ def _split_apps(block: str) -> list[str]:
     text = re.sub(r"(?i)^recommended (?:for use in|for|addition[^.]*:)\s+", "", text)
     if not text:
         return []
-    parts = re.split(r",|;|/|\band\b", text)
+    groups = re.split(r"(\([^()]*\))", text)
+    separators = r",|;|/" if ";" in text else r",|/|\band\b"
+    parts = [""]
+    for index, group in enumerate(groups):
+        if index % 2:
+            parts[-1] += group
+        else:
+            chunks = re.split(separators, group)
+            parts[-1] += chunks[0]
+            parts.extend(chunks[1:])
     return _dedupe([collapse_ws(p).rstrip(".") for p in parts if len(collapse_ws(p)) > 2])
 
 

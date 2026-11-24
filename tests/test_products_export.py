@@ -12,7 +12,7 @@ def test_export_catalog_json_has_2150f():
         data = json.loads(export_catalog_json(conn))
     finally:
         conn.close()
-    assert data["count"] >= 290
+    assert data["count"] >= 280
     p = data["products"]["2150F"]
     assert p["grade"] == "2150F"
     assert p.get("description")

@@ -166,8 +166,10 @@ button.link-btn:hover{border-color:var(--border-hover);background:var(--card-ele
 .chip:hover{border-color:var(--border-hover)}
 .chip.on{background:var(--accent-tint);border-color:var(--accent);color:var(--accent)}
 .spec-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 8px;margin-bottom:10px}
+.spec-grid.with-temperature{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto}
 .spec-grid .name{grid-column:1/-1;font-size:.76rem;color:var(--text-secondary);line-height:1.35;font-weight:500}
 .spec-grid input[type=number]{width:100%;min-width:0;padding:9px 10px;font-size:.88rem}
+.spec-grid select{padding:9px 30px 9px 10px;font-size:.88rem}
 .checks{display:grid;gap:8px}
 .checks label{font-size:.82rem;font-weight:400;display:flex;gap:8px;align-items:flex-start;color:var(--text);line-height:1.4}
 .checks input[type=checkbox]{accent-color:var(--accent);margin-top:2px;flex-shrink:0}
@@ -178,9 +180,10 @@ button.link-btn:hover{border-color:var(--border-hover);background:var(--card-ele
 }
 .card-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
 .title{font-size:1rem;font-weight:600;color:var(--text)}
-.score{font-size:.82rem;color:var(--ok);font-weight:600;white-space:nowrap}
 .meta{font-size:.78rem;color:var(--text-secondary);margin-top:4px;font-weight:400;line-height:1.4}
-.reasons{margin-top:10px;font-size:.78rem;line-height:1.45;color:var(--text)}
+.matched-filters{min-width:0;max-width:55%;font-size:.78rem;line-height:1.45;overflow-wrap:anywhere}
+.matched-filters strong{color:var(--text-secondary)}
+.reasons{margin:4px 0 0;padding:0;color:var(--text)}
 .reasons li{margin-left:16px;margin-bottom:3px}
 .specs-row{font-size:.78rem;color:var(--text-muted);margin-top:6px}
 .actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
@@ -273,6 +276,7 @@ button.link-btn:hover{border-color:var(--border-hover);background:var(--card-ele
   .search input[type=text],.search button.action{min-width:0}
   .search button.action{padding:11px 12px;font-size:15px}
   .card-head{flex-direction:column;align-items:flex-start}
+  .matched-filters{max-width:100%}
   .row{flex-wrap:wrap}
   .row button.link-btn{margin-left:auto}
   .chip{max-width:100%;overflow:hidden;text-overflow:ellipsis}
@@ -444,9 +448,13 @@ function list(items) {
   return "<ul>" + items.map(i => "<li>" + esc(i) + "</li>").join("") + "</ul>";
 }
 function props(obj) {
-  const keys = Object.keys(obj || {});
+  const keys = Object.keys(obj || {}).filter(key => key !== "viscosity_struct");
   if (!keys.length) return '<p class="meta">—</p>';
-  return '<div class="kv">' + keys.map(k => '<div>' + esc(k) + '</div><div>' + esc(obj[k]) + '</div>').join("") + '</div>';
+  const temp = obj.viscosity_struct?.temp_c;
+  return '<div class="kv">' + keys.map(k => {
+    const label = k === "viscosity" && temp != null ? "Viscosity at " + temp + "°C" : k;
+    return '<div>' + esc(label) + '</div><div>' + esc(obj[k]) + '</div>';
+  }).join("") + '</div>';
 }
 function signalBadge(sw) {
   if (!sw) return "";
@@ -586,11 +594,21 @@ function renderFinderSpecs() {
   const map = FINDER.family_specs || {};
   const keys = (family !== "all" && map[family]) ? map[family] : ["viscosity", "hardness", "tg", "functionality", "purity"];
   const labels = FINDER.spec_labels || {};
-  $("finder-specs").innerHTML = keys.map(key =>
-    '<div class="spec-grid"><div class="name">' + esc(labels[key] || key) + '</div>' +
-    '<input type="number" step="any" placeholder="min" data-key="' + esc(key) + '" data-bound="min"/>' +
-    '<input type="number" step="any" placeholder="max" data-key="' + esc(key) + '" data-bound="max"/></div>'
-  ).join("");
+  const temperatureSelect = '<select id="finder-viscosity-temp" aria-label="Viscosity measurement temperature">' +
+    FINDER.viscosity_temperatures_c.map(temp => '<option value="' + temp + '">' + temp + '°C</option>').join("") +
+    '</select>';
+  $("finder-specs").innerHTML = keys.map(key => {
+    const viscosity = key === "viscosity";
+    return '<div class="spec-grid' + (viscosity ? ' with-temperature' : '') + '"><div class="name">' + esc(labels[key] || key) + '</div>' +
+      '<input type="number" step="any" placeholder="min" data-key="' + esc(key) + '" data-bound="min"/>' +
+      '<input type="number" step="any" placeholder="max" data-key="' + esc(key) + '" data-bound="max"/>' +
+      (viscosity ? temperatureSelect : '') + '</div>';
+  }).join("");
+  const temperature = $("finder-viscosity-temp");
+  if (temperature) temperature.onchange = () => {
+    const { min, max } = readFinderCriteria().specs.viscosity;
+    if (min != null || max != null) runFinder();
+  };
 }
 
 function readFinderCriteria() {
@@ -600,6 +618,7 @@ function readFinderCriteria() {
     if (!specs[key]) specs[key] = { min: null, max: null };
     if (inp.value !== "") specs[key][bound] = Number(inp.value);
   });
+  if (specs.viscosity) specs.viscosity.temp_c = Number($("finder-viscosity-temp").value);
   const exclude = [];
   document.querySelectorAll("#finder-safety input[data-flag]").forEach(inp => { if (inp.checked) exclude.push(inp.dataset.flag); });
   return {
@@ -642,6 +661,12 @@ function scoreFinderProduct(product, criteria) {
     if (safety.warning_only && String(product.signal_word || "").toUpperCase() === "DANGER") return null;
   }
   let score = 0; const reasons = [];
+  if (criteria.family !== "all") reasons.push("Family: " + (product.family_en || product.family));
+  for (const flag of safety.exclude_flags || []) {
+    const item = (FINDER.hazard_flags || []).find(entry => entry.id === flag);
+    reasons.push("Safety: excludes " + (item ? item.label : flag));
+  }
+  if (safety.warning_only) reasons.push("Safety: excludes DANGER");
   const apps = criteria.applications || [];
   if (apps.length) {
     const wanted = new Set(apps.map(normApp));
@@ -662,10 +687,18 @@ function scoreFinderProduct(product, criteria) {
   if (activeSpecs.length) {
     let specScore = 0;
     for (const [key, bounds] of activeSpecs) {
-      const chk = specInRange((product.specs || {})[key], bounds.min, bounds.max);
+      const productVal = (product.specs || {})[key];
+      let label = (FINDER.spec_labels || {})[key] || key;
+      if (key === "viscosity") {
+        const temp = bounds.temp_c ?? FINDER.viscosity_temperatures_c[0];
+        if (!FINDER.viscosity_temperatures_c.includes(temp) || productVal?.temp_c !== temp) return null;
+        label += " at " + temp + "°C";
+      }
+      const chk = specInRange(productVal, bounds.min, bounds.max);
       if (!chk.ok) return null;
       specScore += chk.partial;
-      reasons.push("Spec " + ((FINDER.spec_labels || {})[key] || key) + " in range");
+      const range = [bounds.min != null ? "≥ " + bounds.min : "", bounds.max != null ? "≤ " + bounds.max : ""].filter(Boolean).join(", ");
+      reasons.push(label + ": " + range);
     }
     score += 30 * specScore / activeSpecs.length;
   }
@@ -673,11 +706,11 @@ function scoreFinderProduct(product, criteria) {
   if (text) {
     const tokens = text.toLowerCase().split(/[^a-z0-9+\-]+/).filter(t => t.length > 1);
     const blob = [product.description || "", ...(product.highlights || []), ...(product.applications || []), product.family_en || ""].join(" ").toLowerCase();
-    const hits = tokens.filter(t => blob.includes(t)).length;
-    if (hits) { score += Math.min(15, hits * 3); reasons.push("Text match (" + hits + " terms)"); }
+    const hits = tokens.filter(t => blob.includes(t));
+    if (hits.length) { score += Math.min(15, hits.length * 3); reasons.push("Text: " + [...new Set(hits)].join(", ")); }
     else if (!apps.length && !activeSpecs.length && !tags.length) return null;
   }
-  return { score: score || 1, reasons: reasons.length ? reasons : ["Catalog browse"] };
+  return { score: score || 1, reasons };
 }
 
 function runFinder() {
@@ -698,15 +731,16 @@ function renderFinderResults(results) {
     return;
   }
   let html = '<div class="meta" style="margin-top:14px">' + results.length + ' recommendation(s)</div>';
-  results.forEach(({ product, score, reasons }) => {
+  results.forEach(({ product, reasons }) => {
     const sw = product.signal_word;
     const badge = sw === "DANGER" ? '<span class="badge badge-danger">DANGER</span>' : sw === "WARNING" ? '<span class="badge badge-warn">WARNING</span>' : "";
     const specs = Object.values(product.spec_display || {}).slice(0, 4).join(" · ");
     const gradeJs = esc(product.grade).replace(/'/g, "\\'");
     html += '<div class="card"><div class="card-head"><div><div class="title">' + esc(product.grade_display || product.grade) + badge +
-      '</div><div class="meta">' + esc(product.family_en || product.family) + '</div></div><div class="score">' + Math.min(100, Math.round(score)) + '%</div></div>' +
+      '</div><div class="meta">' + esc(product.family_en || product.family) + '</div></div>' +
+      (reasons.length ? '<div class="matched-filters"><strong>Matched filters</strong><ul class="reasons">' +
+        reasons.map(r => '<li>' + esc(r) + '</li>').join("") + '</ul></div>' : '') + '</div>' +
       (specs ? '<div class="specs-row">' + esc(specs) + '</div>' : '') +
-      '<ul class="reasons">' + reasons.slice(0, 4).map(r => '<li>' + esc(r) + '</li>').join("") + '</ul>' +
       '<div class="actions"><button type="button" class="link-btn" onclick="openCatalog(\'' + gradeJs + '\', {returnTo:\'finder\'})">TDS / SDS details</button></div></div>';
   });
   $("finder-out").innerHTML = html;

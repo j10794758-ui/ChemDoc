@@ -15,6 +15,7 @@ from chemdoc_miner.query.spec_schema import (
     HAZARD_FLAGS,
     PERFORMANCE_TAGS,
     SPEC_LABELS,
+    VISCOSITY_TEMPERATURES_C,
     application_display,
     normalize_application,
 )
@@ -76,6 +77,7 @@ def build_finder_index_from_products(
         "applications_vocab": applications_vocab,
         "family_specs": FAMILY_FILTER_SPECS,
         "spec_labels": SPEC_LABELS,
+        "viscosity_temperatures_c": VISCOSITY_TEMPERATURES_C,
         "performance_tags": [
             {"id": tag_id, "label": tag_id.replace("_", " ").title()} for tag_id, _ in PERFORMANCE_TAGS
         ],
@@ -181,11 +183,20 @@ def _score_product(
         spec_score = 0.0
         for key, bounds in active_specs.items():
             product_val = (product.get("specs") or {}).get(key)
+            label = index.get("spec_labels", SPEC_LABELS).get(key, key)
+            if key == "viscosity":
+                temp_c = bounds.get("temp_c", VISCOSITY_TEMPERATURES_C[0])
+                if (
+                    temp_c not in VISCOSITY_TEMPERATURES_C
+                    or not isinstance(product_val, dict)
+                    or product_val.get("temp_c") != temp_c
+                ):
+                    return None
+                label = f"{label} at {temp_c}°C"
             ok, partial, _ = spec_in_range(product_val, bounds.get("min"), bounds.get("max"))
             if not ok:
                 return None
             spec_score += partial
-            label = index.get("spec_labels", SPEC_LABELS).get(key, key)
             disp = (product.get("spec_display") or {}).get(key, "")
             spec_hits.append(f"{label}: {disp}" if disp else label)
             reasons.append(f"Spec {label} in range")

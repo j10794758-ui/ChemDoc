@@ -72,6 +72,25 @@ def test_find_by_viscosity_range():
         assert item["family"] == "pua"
 
 
+def test_viscosity_filter_matches_only_the_selected_temperature():
+    conn = connect()
+    try:
+        index = build_finder_index(conn)
+    finally:
+        conn.close()
+
+    for temp, expected, excluded in ((25, "2665-2", "2600"), (60, "2600", "2665-2")):
+        result = find_products(
+            {"specs": {"viscosity": {"min": 900, "max": 1500, "temp_c": temp}}},
+            index,
+            limit=index["count"],
+        )
+        grades = {item["grade"] for item in result["results"]}
+        assert expected in grades
+        assert excluded not in grades
+        assert all(index["products"][grade]["specs"]["viscosity"]["temp_c"] == temp for grade in grades)
+
+
 def test_export_finder_html(tmp_path):
     out = tmp_path / "ChemDoc.html"
     path = export_app_html(out_path=out)

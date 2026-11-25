@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from chemdoc_miner.glossary import FAMILY_EN, FAMILY_LABELS
 
+VISCOSITY_TEMPERATURES_C = (25, 60)
+
 # Numeric / range filters exposed per family (Phase 1).
 FAMILY_FILTER_SPECS: dict[str, list[str]] = {
     "pua": ["viscosity", "hardness", "tg", "functionality", "acid_value"],

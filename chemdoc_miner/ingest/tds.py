@@ -18,6 +18,7 @@ _KV = re.compile(
     r"^(?P<key>[A-Za-z][A-Za-z0-9 ,./%()°℃\-@]*)\s*[:：]\s*(?P<value>.+)$"
 )
 _CAS = re.compile(r"\b(\d{2,7}-\d{2}-\d)\b")
+_VISCOSITY_TEMPERATURE_BY_GRADE = {"2600": 60, "2665-2": 25}
 
 _STORAGE_MARKER = re.compile(r"(?i)\s*storage\s+and\s+handling\s*[:：]\s*")
 _PKG_SPEC = re.compile(r"\d+\s*kg/(?:drum|pail|IBC|plastic\s+drum|carton)", re.I)
@@ -50,9 +51,8 @@ _STOP_HEADINGS = (
 def parse_tds(text: str, filename: str = "") -> dict[str, Any]:
     cleaned = _prep(text)
     template = "bjtds" if re.search(r"TDS\s*No", cleaned, re.I) else "pda"
-    parsed = _parse_bjtds(cleaned) if template == "bjtds" else _parse_pda(cleaned)
-    grade = parsed.get("grade") or grade_from_filename(filename)
-    parsed["grade"] = normalize_grade(grade)
+    parser = _parse_bjtds if template == "bjtds" else _parse_pda
+    parsed = parser(cleaned, grade_from_filename(filename))
     parsed["grade_display"] = _display_grade(parsed["grade"], cleaned)
     parsed["template"] = template
     parsed["revised_date"] = parsed.get("revised_date") or parse_date(cleaned)
@@ -85,17 +85,17 @@ def _display_grade(grade: str, text: str) -> str:
     return f"iLENE {grade}"
 
 
-def _parse_pda(text: str) -> dict[str, Any]:
+def _parse_pda(text: str, filename_grade: str) -> dict[str, Any]:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     body = _DISCLAIMER.split(text, maxsplit=1)[0]
     product_line = next((ln for ln in lines if re.search(r"ilene", ln, re.I)), lines[0] if lines else "")
     product_line = re.split(r"Revised", product_line, maxsplit=1, flags=re.I)[0]
-    grade = normalize_grade(product_line)
+    grade = normalize_grade(product_line) or filename_grade
     sections = _split_pda_sections(body)
     description = collapse_ws(sections.get("description", ""))
     chem = _first_kv(sections.get("chemical name", "") or body, ("chemical name",))
     props_block = sections.get("physical properties") or sections.get("specifications") or ""
-    properties = _parse_properties(props_block)
+    properties = _parse_properties(props_block, viscosity_temp_c=_VISCOSITY_TEMPERATURE_BY_GRADE.get(grade))
     if chem:
         properties.setdefault("chemical_name_raw", chem)
     highlights = _bullet_lines(sections.get("performance highlights", ""))
@@ -149,11 +149,13 @@ def _split_pda_sections(text: str) -> dict[str, str]:
     return sections
 
 
-def _parse_bjtds(text: str) -> dict[str, Any]:
+def _parse_bjtds(text: str, filename_grade: str) -> dict[str, Any]:
     name = ""
     m = re.search(r"(?im)^name\s+(.+)$", text)
     if m:
         name = m.group(1).strip()
+    grade = normalize_grade(name) or filename_grade
+    viscosity_temp_c = _VISCOSITY_TEMPERATURE_BY_GRADE.get(grade)
     chem = None
     cm = re.search(r"(?im)^chemical\s*name\s*[:：]?\s*(.+)$", text)
     if cm:
@@ -165,12 +167,12 @@ def _parse_bjtds(text: str) -> dict[str, Any]:
     apps_block = _slice_between(text, r"(?im)^application\b", r"(?im)^(packaging|precautions)\b") or ""
     applications = _split_apps(re.sub(r"[☆★]", " ", apps_block))
     props_block = _slice_between(text, r"(?im)^properties\b", r"(?im)^(features|application|packaging)\b") or ""
-    properties = _parse_properties(re.sub(r"[☆★]", "\n", props_block))
+    properties = _parse_properties(props_block, viscosity_temp_c=viscosity_temp_c)
     # stars on same lines as section titles
     for line in text.splitlines():
         if "☆" in line or "★" in line:
             bit = _STAR_LINE.sub("", line.split("☆", 1)[-1] if "☆" in line else line)
-            parsed = _parse_properties(bit)
+            parsed = _parse_properties(bit, viscosity_temp_c=viscosity_temp_c)
             for key, value in parsed.items():
                 properties.setdefault(key, value)
             if ":" not in line and "☆" in line:
@@ -185,7 +187,7 @@ def _parse_bjtds(text: str) -> dict[str, Any]:
     )
     description = collapse_ws(intro) if intro else ""
     return {
-        "grade": normalize_grade(name),
+        "grade": grade,
         "chemical_name": chem,
         "description": description,
         "properties": properties,
@@ -243,7 +245,7 @@ def _slice_between(text: str, start_pat: str, end_pat: str) -> str:
     return (rest[: end.start()] if end else rest).strip()
 
 
-def _parse_properties(block: str) -> dict[str, Any]:
+def _parse_properties(block: str, *, viscosity_temp_c: int | None = None) -> dict[str, Any]:
     props: dict[str, Any] = {}
     blob = block.replace("☆", "\n").replace("★", "\n")
     for raw_line in blob.splitlines():
@@ -257,11 +259,15 @@ def _parse_properties(block: str) -> dict[str, Any]:
         value = collapse_ws(match.group("value"))
         if not key or not value:
             continue
-        props[key] = value
         if key == "viscosity":
-            parsed_visc = _parse_viscosity(line + " " + value, value)
+            parsed_visc = _parse_viscosity(line, value)
+            if viscosity_temp_c is not None and (
+                not parsed_visc or parsed_visc["temp_c"] != viscosity_temp_c
+            ):
+                continue
             if parsed_visc:
                 props["viscosity_struct"] = parsed_visc
+        props[key] = value
         if key == "functionality":
             num = re.search(r"(\d+(?:\.\d+)?)", value)
             if num:

@@ -59,3 +59,19 @@ def test_bjtds_template():
     assert parsed["package"] == "200kg/drum"
     assert "storage stability" in (parsed["storage"] or "")
     assert "6 months" in (parsed["storage"] or "")
+
+
+def test_viscosity_temperature_selection_is_independent_of_pdf_row_order():
+    for grade, temp, other_temp, value, minimum, maximum in (
+        ("2600", 60, 25, "1,000-1,500", 1000, 1500),
+        ("2665-2", 25, 60, "900", 900, 900),
+    ):
+        text = PDA.replace("2201", grade).replace(
+            "Viscosity, cPs@60℃ : 6000",
+            f"Viscosity, cPs@{temp}℃ : {value}\nViscosity, cPs@{other_temp}℃ : 9999",
+        )
+        properties = parse_tds(text)["properties"]
+        assert properties["viscosity"] == value
+        assert properties["viscosity_struct"] == {
+            "raw": value, "temp_c": temp, "min": minimum, "max": maximum, "unit": "cPs",
+        }
